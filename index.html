@@ -263,6 +263,16 @@
             margin: 5px 0;
             font-size: 12px;
         }
+        
+        /* 接続状態による表示制御 */
+        .midi-disconnected .tabs,
+        .midi-disconnected .view {
+            display: none;
+        }
+        
+        .midi-connected .connection-prompt {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -281,9 +291,37 @@
             </button>
         </div>
         
-        <div class="container">
+        <div class="container" :class="{ 'midi-connected': midiAccessAvailable, 'midi-disconnected': !midiAccessAvailable }">
+            <!-- 未接続時のメッセージ -->
+            <div class="connection-prompt" style="text-align: center; padding: 20px;">
+                <div :class="['status', 'disconnected']">
+                    {{ $t('connection.status.disconnected') }}
+                </div>
+                <button 
+                    @click="connectMIDI" 
+                    style="
+                        margin-top: 20px;
+                        background: #4CAF50; 
+                        border: none; 
+                        color: white; 
+                        padding: 15px 30px; 
+                        border-radius: 8px; 
+                        cursor: pointer;
+                        font-family: inherit;
+                        font-size: 18px;
+                        font-weight: bold;
+                        box-shadow: 0 4px 8px rgba(76, 175, 80, 0.3);
+                        transition: all 0.2s ease;
+                    "
+                    @mouseover="$event.target.style.transform = 'scale(1.05)'"
+                    @mouseout="$event.target.style.transform = 'scale(1)'"
+                >
+                    {{ $t('connection.button') }}
+                </button>
+            </div>
+            
             <!-- タブナビゲーション -->
-            <div v-if="midiAccessAvailable" class="tabs">
+            <div class="tabs">
                 <button class="tab-button" :class="{ active: currentView === 'main' }" @click="currentView = 'main'">
                     {{ $t('ui.tabs.control') }}
                 </button>
@@ -294,22 +332,13 @@
                     {{ $t('ui.tabs.midiHub') }}
                 </button>
             </div>
-            
-            <div v-if="!midiAccessAvailable" style="text-align: center; padding: 20px;">
-                <div :class="['status', 'disconnected']">
-                    {{ $t('connection.status.disconnected') }}
-                </div>
-                <button @click="connectMIDI" style="margin-top: 10px;">
-                    {{ $t('connection.button') }}
-                </button>
-            </div>
 
             <!-- メイン画面 -->
             <div v-show="currentView === 'main'" class="view main-view">
-                <div v-if="midiAccessAvailable && midiConnected" style="position: absolute; top: 5px; right: 10px; font-size: 10px; opacity: 0.7; z-index: 10;">
+                <div v-if="midiConnected" style="position: absolute; top: 5px; right: 10px; font-size: 10px; opacity: 0.7; z-index: 10;">
                     {{ midiInputs.length }}in / {{ midiOutputs.length }}out
                 </div>
-                <div v-if="midiAccessAvailable" class="button-grid">
+                <div class="button-grid">
                     <button 
                         v-for="button in buttons" 
                         :key="button.id"
@@ -487,7 +516,6 @@
                         </button>
                         
                         <button 
-                            v-if="midiAccessAvailable"
                             @click="disconnectMIDI" 
                             style="background: #d32f2f; border: none; color: white; padding: 10px 15px; border-radius: 5px; cursor: pointer;"
                         >
@@ -537,12 +565,12 @@
                     </div>
                 </div>
                 
-                <div v-if="midiConnected" style="margin-top: 20px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div v-if="midiConnected" style="margin-top: 20px; display: flex; flex-direction: column; flex: 1; min-height: 0;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;">
                         <h3>{{ $t('log.title') }}</h3>
-                        <button @click="clearLogs" style="padding: 5px 10px; font-size: 12px;">{{ $t('log.clearButton') }}</button>
+                        <button @click="clearLogs" style="background: #ff9800; border: none; color: white; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-family: inherit;">{{ $t('log.clearButton') }}</button>
                     </div>
-                    <div id="midi-logs" style="background: #222; border: 1px solid #444; border-radius: 5px; padding: 10px; height: 300px; overflow-y: auto; font-family: monospace; font-size: 12px;">
+                    <div id="midi-logs" style="background: #222; border: 1px solid #444; border-radius: 5px; padding: 10px; flex: 1; overflow-y: auto; font-family: monospace; font-size: 12px; min-height: 0;">
                         <div v-if="midiLogs.length === 0" style="color: #666;">
                             {{ $t('log.waitingMessage') }}
                         </div>
