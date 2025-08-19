@@ -2,6 +2,12 @@
 
 スマートフォンをMIDI Hostとして機能させ、複数のMIDIデバイスを相互接続するためのProgressive Web App（PWA）です。
 
+フットスイッチ代わりに:
+![Control](./doc/control.png)
+
+MIDIメッセージを中継
+![MIDI Hub](./doc/midi-hub.png)
+
 ## 主な機能
 
 ### ️ スマホをMIDI Hostに
