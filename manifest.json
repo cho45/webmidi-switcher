@@ -2,15 +2,15 @@
     "name": "WebMIDI Switcher",
     "short_name": "MIDI Switcher",
     "description": "MIDI message controller app using WebMIDI API",
-    "start_url": "/",
+    "start_url": "./",
     "display": "standalone",
     "background_color": "#1a1a1a",
     "theme_color": "#4CAF50",
     "orientation": "portrait",
     "icons": [
         {
-            "src": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgdmlld0JveD0iMCAwIDUxMiA1MTIiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiByeD0iNzIiIGZpbGw9IiMxYTFhMWEiLz4KPGNpcmNsZSBjeD0iMTI4IiBjeT0iMTI4IiByPSI0OCIgZmlsbD0iIzRDQUY1MCIvPgo8Y2lyY2xlIGN4PSIzODQiIGN5PSIxMjgiIHI9IjQ4IiBmaWxsPSIjNENBRjUwIi8+CjxjaXJjbGUgY3g9IjEyOCIgY3k9IjM4NCIgcj0iNDgiIGZpbGw9IiM0Q0FGNTASCZ8KPGNpcmNsZSBjeD0iMzg0IiBjeT0iMzg0IiByPSI0OCIgZmlsbD0iIzRDQUY1MCIvPgo8L3N2Zz4K",
-            "sizes": "512x512",
+            "src": "icon.svg",
+            "sizes": "192x192 512x512",
             "type": "image/svg+xml",
             "purpose": "any maskable"
         }
