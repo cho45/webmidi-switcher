@@ -143,6 +143,7 @@ export default class MIDIManager extends EventTarget {
 
     sendMultipleMessages(messages) {
         const results = [];
+        console.log(Array.from(messages));
         messages.forEach(msg => {
             try {
                 results.push(this.sendMidiMessage(msg));
