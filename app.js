@@ -7,9 +7,16 @@ import MIDIManager from './midi-manager.js';
 /**
  * Vue I18n セットアップ
  */
+// ブラウザの言語設定を取得
+const detectLocale = () => {
+    const navLang = navigator.language.toLowerCase();
+    if (navLang.startsWith('ja')) return 'ja';
+    return 'en';
+};
+
 const i18n = createI18n({
     legacy: false,
-    locale: 'ja',
+    locale: detectLocale(),
     fallbackLocale: 'en',
     messages: {
         en,
@@ -25,19 +32,46 @@ const app = createApp({
         return {
             midiManager: new MIDIManager(),
             midiConnected: false,
+            midiAccessAvailable: false,
             midiOutputs: [],
             midiInputs: [],
-            isEffectOn: false,
+            currentView: 'main',
             wakeLock: null,
             wakeLockActive: false,
             lastToggleTime: 0,
             debounceMs: 300,
             deviceChangeNotification: '',
             errorNotification: '',
-            settings: {
-                channel: 0,
-                controller: 64
+            updateAvailable: false,
+            newServiceWorker: null,
+            swInfo: {
+                version: '',
+                isDev: false,
+                registered: false
             },
+            activeButtons: new Set(),
+            buttons: [
+                {
+                    id: 0,
+                    label: '', // 動的に設定される
+                    press: [
+                        { type: 'cc', channel: 0, controller: 64, value: 127 }
+                    ],
+                    release: [
+                        { type: 'cc', channel: 0, controller: 64, value: 0 }
+                    ]
+                },
+                {
+                    id: 1,
+                    label: '', // 動的に設定される
+                    press: [
+                        { type: 'cc', channel: 0, controller: 65, value: 127 }
+                    ],
+                    release: [
+                        { type: 'cc', channel: 0, controller: 65, value: 0 }
+                    ]
+                }
+            ],
             midiLogs: [],
             maxLogs: 50
         }
@@ -47,6 +81,7 @@ const app = createApp({
         async connectMIDI(autoConnect = false) {
             try {
                 const connected = await this.midiManager.connect();
+                this.midiAccessAvailable = true;
 
                 // デバイス接続時のイベントリスナーを設定
                 this.midiManager.addEventListener('deviceConnected', (event) => {
@@ -67,7 +102,6 @@ const app = createApp({
                 });
 
                 this.updateDeviceList();
-                this.midiConnected = connected;
 
                 if (connected) {
                     this.saveSettings();
@@ -86,9 +120,21 @@ const app = createApp({
             }
         },
 
+        disconnectMIDI() {
+            this.midiManager.cleanup();
+            this.midiConnected = false;
+            this.midiAccessAvailable = false;
+            this.midiInputs = [];
+            this.midiOutputs = [];
+            this.midiLogs = [];
+            console.log('MIDI disconnected');
+        },
+
         updateDeviceList() {
             this.midiInputs = this.midiManager.inputs;
             this.midiOutputs = this.midiManager.outputs;
+            // デバイスが1つでもあれば接続状態とする
+            this.midiConnected = this.midiInputs.length > 0 || this.midiOutputs.length > 0;
         },
 
         showDeviceConnectedNotification(port) {
@@ -178,7 +224,9 @@ const app = createApp({
 
         saveSettings() {
             const data = {
-                settings: this.settings
+                buttons: this.buttons,
+                currentView: this.currentView,
+                locale: this.$i18n.locale
             };
             localStorage.setItem('midiSwitcherSettings', JSON.stringify(data));
         },
@@ -186,14 +234,24 @@ const app = createApp({
         loadSettings() {
             const saved = localStorage.getItem('midiSwitcherSettings');
             if (saved) {
-                const data = JSON.parse(saved);
-                if (data.settings) {
-                    this.settings = { ...this.settings, ...data.settings };
+                try {
+                    const data = JSON.parse(saved);
+                    if (data.buttons && Array.isArray(data.buttons)) {
+                        this.buttons = data.buttons;
+                    }
+                    if (data.currentView) {
+                        this.currentView = data.currentView;
+                    }
+                    if (data.locale) {
+                        this.$i18n.locale = data.locale;
+                    }
+                } catch (error) {
+                    console.error('Error loading settings:', error);
                 }
             }
         },
 
-        toggleEffect() {
+        handleButtonPress(buttonId) {
             const now = Date.now();
             if (now - this.lastToggleTime < this.debounceMs) {
                 return;
@@ -205,16 +263,49 @@ const app = createApp({
                 return;
             }
 
-            this.isEffectOn = !this.isEffectOn;
-            const value = this.isEffectOn ? 127 : 0;
-            
-            const result = this.midiManager.sendControlChange(
-                this.settings.channel,
-                this.settings.controller,
-                value
-            );
+            const button = this.buttons[buttonId];
+            if (!button) return;
 
-            this.addMidiLog(result.source, result.destinations, result.message);
+            this.activeButtons.add(buttonId);
+            
+            const results = this.midiManager.sendMultipleMessages(button.press);
+            results.forEach(result => {
+                this.addMidiLog(result.source, result.destinations, result.message);
+            });
+        },
+
+        handleButtonRelease(buttonId) {
+            const button = this.buttons[buttonId];
+            if (!button) return;
+
+            this.activeButtons.delete(buttonId);
+            
+            const results = this.midiManager.sendMultipleMessages(button.release);
+            results.forEach(result => {
+                this.addMidiLog(result.source, result.destinations, result.message);
+            });
+        },
+
+        addButton() {
+            const newId = Math.max(...this.buttons.map(b => b.id)) + 1;
+            this.buttons.push({
+                id: newId,
+                label: this.$t('ui.defaults.button', { number: newId + 1 }),
+                press: [
+                    { type: 'cc', channel: 0, controller: 70 + newId, value: 127 }
+                ],
+                release: [
+                    { type: 'cc', channel: 0, controller: 70 + newId, value: 0 }
+                ]
+            });
+        },
+
+        removeButton(buttonId) {
+            const index = this.buttons.findIndex(b => b.id === buttonId);
+            if (index !== -1) {
+                this.buttons.splice(index, 1);
+                this.activeButtons.delete(buttonId);
+            }
         },
 
         async requestWakeLock() {
@@ -239,6 +330,148 @@ const app = createApp({
                 console.error('Wake lock operation failed:', error);
                 this.wakeLockActive = false;
             }
+        },
+
+        showSuccessNotification(message) {
+            this.deviceChangeNotification = message;
+            setTimeout(() => {
+                this.deviceChangeNotification = '';
+            }, 3000);
+        },
+
+        async clearCache() {
+            try {
+                if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+                    // サービスワーカー経由でキャッシュクリア
+                    navigator.serviceWorker.controller.postMessage({ action: 'clearCache' });
+                    this.showSuccessNotification(this.$t('notifications.success.cacheCleared'));
+                    console.log('Cache clear requested via service worker');
+                } else if ('caches' in window) {
+                    // 直接キャッシュクリア
+                    const cacheNames = await caches.keys();
+                    await Promise.all(
+                        cacheNames.map(cacheName => caches.delete(cacheName))
+                    );
+                    this.showSuccessNotification(this.$t('notifications.success.cacheCleared'));
+                    console.log('All caches cleared directly');
+                }
+            } catch (error) {
+                console.error('Cache clear failed:', error);
+                this.showErrorNotification(this.$t('notifications.errors.cacheClearFailed'));
+            }
+        },
+
+        async updateApp() {
+            if (this.newServiceWorker) {
+                this.newServiceWorker.postMessage({ action: 'skipWaiting' });
+                this.updateAvailable = false;
+                window.location.reload();
+            }
+        },
+
+        initializeDefaultLabels() {
+            // 空のラベルをデフォルト値で埋める
+            this.buttons.forEach((button, index) => {
+                if (!button.label) {
+                    if (button.id === 0) {
+                        button.label = this.$t('ui.defaults.effect');
+                    } else {
+                        button.label = this.$t('ui.defaults.button', { number: index + 1 });
+                    }
+                }
+            });
+        },
+
+        changeLanguage(locale) {
+            this.$i18n.locale = locale;
+            this.saveSettings();
+        },
+
+        addMidiMessage(buttonId, eventType) {
+            const button = this.buttons.find(b => b.id === buttonId);
+            if (!button) return;
+            
+            const newMessage = {
+                type: 'cc',
+                channel: 0,
+                controller: 1,
+                value: eventType === 'press' ? 127 : 0
+            };
+            
+            button[eventType].push(newMessage);
+        },
+
+        removeMidiMessage(buttonId, eventType, messageIndex) {
+            const button = this.buttons.find(b => b.id === buttonId);
+            if (!button || !button[eventType]) return;
+            
+            button[eventType].splice(messageIndex, 1);
+        },
+
+        updateMidiMessage(buttonId, eventType, messageIndex, field, value) {
+            const button = this.buttons.find(b => b.id === buttonId);
+            if (!button || !button[eventType] || !button[eventType][messageIndex]) return;
+            
+            // 数値フィールドは数値に変換
+            if (['channel', 'controller', 'value', 'note', 'velocity', 'program'].includes(field)) {
+                value = parseInt(value, 10);
+                if (isNaN(value)) return;
+            }
+            
+            button[eventType][messageIndex][field] = value;
+        },
+
+        exportSettings() {
+            const settings = {
+                version: '1.0',
+                timestamp: new Date().toISOString(),
+                locale: this.$i18n.locale,
+                buttons: this.buttons
+            };
+            
+            const dataStr = JSON.stringify(settings, null, 2);
+            const dataBlob = new Blob([dataStr], {type: 'application/json'});
+            
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(dataBlob);
+            link.download = `midi-switcher-settings-${new Date().toISOString().slice(0,19)}.json`;
+            link.click();
+            
+            this.showSuccessNotification(this.$t('notifications.success.settingsExported'));
+        },
+
+        importSettings(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const settings = JSON.parse(e.target.result);
+                    
+                    // バリデーション
+                    if (!settings.buttons || !Array.isArray(settings.buttons)) {
+                        throw new Error('Invalid settings format');
+                    }
+                    
+                    // 設定を適用
+                    this.buttons = settings.buttons;
+                    if (settings.locale) {
+                        this.changeLanguage(settings.locale);
+                    }
+                    
+                    this.saveSettings();
+                    this.showSuccessNotification(this.$t('notifications.success.settingsImported'));
+                    
+                } catch (error) {
+                    console.error('Settings import error:', error);
+                    this.showErrorNotification(this.$t('notifications.errors.settingsImportFailed'));
+                }
+            };
+            reader.readAsText(file);
+            
+            // ファイル選択をリセット
+            event.target.value = '';
         }
     },
 
@@ -252,9 +485,86 @@ const app = createApp({
     },
 
     mounted() {
+        this.initializeDefaultLabels();
         this.loadSettings();
         this.wakeLockActive = false;
         this.requestWakeLock();
+
+        // Service Worker登録
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js')
+                .then(registration => {
+                    console.log('Service Worker registered:', registration);
+                    
+                    // アップデート検知
+                    registration.addEventListener('updatefound', () => {
+                        const newWorker = registration.installing;
+                        console.log('New service worker installing...');
+                        
+                        newWorker.addEventListener('statechange', () => {
+                            console.log('Service Worker state:', newWorker.state);
+                            
+                            if (newWorker.state === 'installed') {
+                                if (navigator.serviceWorker.controller) {
+                                    // 既存のSWがある場合は更新を通知
+                                    this.newServiceWorker = newWorker;
+                                    this.updateAvailable = true;
+                                    console.log('New version available - update ready');
+                                } else {
+                                    // 初回インストール
+                                    console.log('Service Worker installed for the first time');
+                                }
+                            }
+                        });
+                    });
+
+                    // Service Worker メッセージ受信
+                    navigator.serviceWorker.addEventListener('message', event => {
+                        const { action, version, isDev } = event.data || {};
+                        console.log('SW Message:', event.data);
+                        
+                        switch (action) {
+                            case 'activated':
+                                console.log(`Service Worker activated: ${version} ${isDev ? '[DEV]' : '[PROD]'}`);
+                                this.swInfo = { version, isDev, registered: true };
+                                if (isDev) {
+                                    this.showSuccessNotification(this.$t('notifications.success.devModeActive'));
+                                }
+                                break;
+                                
+                            case 'info':
+                                console.log(`Service Worker info received: ${version} ${isDev ? '[DEV]' : '[PROD]'}`);
+                                this.swInfo = { version, isDev, registered: true };
+                                break;
+                                
+                            case 'cacheCleared':
+                                console.log('Cache cleared by service worker');
+                                break;
+                                
+                            case 'reload':
+                                console.log('Reload requested by service worker');
+                                window.location.reload();
+                                break;
+                        }
+                    });
+
+                    // 既にアクティブなサービスワーカーから情報を取得
+                    if (registration.active) {
+                        console.log('Service Worker already active, requesting info...');
+                        registration.active.postMessage({ action: 'getInfo' });
+                    }
+
+                    // 定期的にアップデートをチェック（本番環境のみ）
+                    setInterval(() => {
+                        if (!window.location.hostname.includes('localhost')) {
+                            registration.update();
+                        }
+                    }, 60000); // 1分ごと
+                })
+                .catch(error => {
+                    console.error('Service Worker registration failed:', error);
+                });
+        }
 
         setTimeout(() => {
             this.connectMIDI(true);
@@ -269,11 +579,14 @@ const app = createApp({
     },
 
     watch: {
-        settings: {
+        buttons: {
             handler() {
                 this.saveSettings();
             },
             deep: true
+        },
+        currentView() {
+            this.saveSettings();
         }
     }
 });

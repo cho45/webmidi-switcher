@@ -98,6 +98,61 @@ export default class MIDIManager extends EventTarget {
         };
     }
 
+    sendMidiMessage(messageConfig) {
+        const { type, channel, ...params } = messageConfig;
+        let midiData;
+        
+        switch(type) {
+            case 'cc':
+                midiData = [0xB0 + channel, params.controller, params.value];
+                break;
+            case 'note':
+                if (params.velocity > 0) {
+                    midiData = [0x90 + channel, params.note, params.velocity];
+                } else {
+                    midiData = [0x80 + channel, params.note, 0];
+                }
+                break;
+            case 'program':
+                midiData = [0xC0 + channel, params.program];
+                break;
+            case 'pitch':
+                const value = params.value || 8192; // Center position
+                midiData = [0xE0 + channel, value & 0x7F, (value >> 7) & 0x7F];
+                break;
+            default:
+                throw new Error(`Unsupported MIDI message type: ${type}`);
+        }
+
+        const destinations = [];
+        this.outputs.forEach(output => {
+            try {
+                output.send(midiData);
+                destinations.push(output.name);
+            } catch (error) {
+                console.error('MIDI send error:', output.name, error);
+            }
+        });
+
+        return {
+            source: null,
+            destinations,
+            message: midiData
+        };
+    }
+
+    sendMultipleMessages(messages) {
+        const results = [];
+        messages.forEach(msg => {
+            try {
+                results.push(this.sendMidiMessage(msg));
+            } catch (error) {
+                console.error('Error sending MIDI message:', error);
+            }
+        });
+        return results;
+    }
+
 
     initializePortStates() {
         if (!this.access) return;
