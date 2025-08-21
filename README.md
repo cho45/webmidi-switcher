@@ -36,7 +36,7 @@ MIDIメッセージを中継
 ### 開発環境
 ```bash
 # HTTPサーバーを起動
-npx http-server
+npx serve .
 
 # HTTPS環境が必要な場合（本番テスト用）
 ngrok http 8000
