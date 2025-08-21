@@ -73,11 +73,96 @@ const app = createApp({
                 }
             ],
             midiLogs: [],
-            maxLogs: 50
+            maxLogs: 50,
+            vueReady: false
         }
     },
 
     methods: {
+        async initialize() {
+            this.initializeDefaultLabels();
+            this.loadSettings();
+            this.wakeLockActive = false;
+            this.requestWakeLock();
+
+            this.registerServiceWorker();
+
+            await this.connectMIDI(true);
+
+            // Vue初期化完了を通知
+            this.vueReady = true;
+        },
+
+        async registerServiceWorker() {
+            if (!('serviceWorker' in navigator)) return
+            let registration;
+            try {
+                registration = await navigator.serviceWorker.register('sw.js');
+            } catch(error) {
+                console.error('Service Worker registration failed:', error);
+            }
+            console.log('Service Worker registered:', registration);
+            // アップデート検知
+            registration.addEventListener('updatefound', () => {
+                const newWorker = registration.installing;
+                console.log('New service worker installing...');
+
+                newWorker.addEventListener('statechange', () => {
+                    console.log('Service Worker state:', newWorker.state);
+
+                    if (newWorker.state === 'installed') {
+                        if (navigator.serviceWorker.controller) {
+                            // 既存のSWがある場合は更新を通知
+                            this.newServiceWorker = newWorker;
+                            this.updateAvailable = true;
+                            console.log('New version available - update ready');
+                        } else {
+                            // 初回インストール
+                            console.log('Service Worker installed for the first time');
+                        }
+                    }
+                });
+            });
+
+            // Service Worker メッセージ受信
+            navigator.serviceWorker.addEventListener('message', event => {
+                const { action, version, isDev } = event.data || {};
+                console.log('SW Message:', event.data);
+
+                switch (action) {
+                    case 'activated':
+                        console.log(`Service Worker activated: ${version} ${isDev ? '[DEV]' : '[PROD]'}`);
+                        this.swInfo = { version, isDev, registered: true };
+                        if (isDev) {
+                            this.showSuccessNotification(this.$t('notifications.success.devModeActive'));
+                        }
+                        break;
+
+                    case 'info':
+                        console.log(`Service Worker info received: ${version} ${isDev ? '[DEV]' : '[PROD]'}`);
+                        this.swInfo = { version, isDev, registered: true };
+                        break;
+
+                    case 'cacheCleared':
+                        console.log('Cache cleared by service worker');
+                        break;
+
+                    case 'reload':
+                        console.log('Reload requested by service worker');
+                        window.location.reload();
+                        break;
+                }
+            });
+
+            // 既にアクティブなサービスワーカーから情報を取得
+            if (registration.active) {
+                console.log('Service Worker already active, requesting info...');
+                registration.active.postMessage({ action: 'getInfo' });
+            }
+
+            registration.update();
+        },
+
         async connectMIDI(autoConnect = false) {
             try {
                 const connected = await this.midiManager.connect();
@@ -485,90 +570,7 @@ const app = createApp({
     },
 
     mounted() {
-        this.initializeDefaultLabels();
-        this.loadSettings();
-        this.wakeLockActive = false;
-        this.requestWakeLock();
-
-        // Service Worker登録
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js')
-                .then(registration => {
-                    console.log('Service Worker registered:', registration);
-                    
-                    // アップデート検知
-                    registration.addEventListener('updatefound', () => {
-                        const newWorker = registration.installing;
-                        console.log('New service worker installing...');
-                        
-                        newWorker.addEventListener('statechange', () => {
-                            console.log('Service Worker state:', newWorker.state);
-                            
-                            if (newWorker.state === 'installed') {
-                                if (navigator.serviceWorker.controller) {
-                                    // 既存のSWがある場合は更新を通知
-                                    this.newServiceWorker = newWorker;
-                                    this.updateAvailable = true;
-                                    console.log('New version available - update ready');
-                                } else {
-                                    // 初回インストール
-                                    console.log('Service Worker installed for the first time');
-                                }
-                            }
-                        });
-                    });
-
-                    // Service Worker メッセージ受信
-                    navigator.serviceWorker.addEventListener('message', event => {
-                        const { action, version, isDev } = event.data || {};
-                        console.log('SW Message:', event.data);
-                        
-                        switch (action) {
-                            case 'activated':
-                                console.log(`Service Worker activated: ${version} ${isDev ? '[DEV]' : '[PROD]'}`);
-                                this.swInfo = { version, isDev, registered: true };
-                                if (isDev) {
-                                    this.showSuccessNotification(this.$t('notifications.success.devModeActive'));
-                                }
-                                break;
-                                
-                            case 'info':
-                                console.log(`Service Worker info received: ${version} ${isDev ? '[DEV]' : '[PROD]'}`);
-                                this.swInfo = { version, isDev, registered: true };
-                                break;
-                                
-                            case 'cacheCleared':
-                                console.log('Cache cleared by service worker');
-                                break;
-                                
-                            case 'reload':
-                                console.log('Reload requested by service worker');
-                                window.location.reload();
-                                break;
-                        }
-                    });
-
-                    // 既にアクティブなサービスワーカーから情報を取得
-                    if (registration.active) {
-                        console.log('Service Worker already active, requesting info...');
-                        registration.active.postMessage({ action: 'getInfo' });
-                    }
-
-                    // 定期的にアップデートをチェック（本番環境のみ）
-                    setInterval(() => {
-                        if (!window.location.hostname.includes('localhost')) {
-                            registration.update();
-                        }
-                    }, 60000); // 1分ごと
-                })
-                .catch(error => {
-                    console.error('Service Worker registration failed:', error);
-                });
-        }
-
-        setTimeout(() => {
-            this.connectMIDI(true);
-        }, 1000);
+        this.initialize();
     },
 
     beforeUnmount() {
